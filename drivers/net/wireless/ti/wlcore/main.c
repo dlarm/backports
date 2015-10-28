@@ -6448,7 +6448,7 @@ struct ieee80211_hw *wlcore_alloc_hw(size_t priv_size, u32 aggr_buf_size,
 		ret = -ENOMEM;
 		goto err_mbox;
 	}
-#if 0
+
 	/* time sync */
 	wl->time_sync.gpio = 66;
 	ret = gpio_request_one(wl->time_sync.gpio, GPIOF_DIR_OUT, "time_sync");
@@ -6457,7 +6457,7 @@ struct ieee80211_hw *wlcore_alloc_hw(size_t priv_size, u32 aggr_buf_size,
 		goto err_buffer_32;
 	}
 	wl1271_info("Time Sync: gpio requested");
-#endif
+
 	hrtimer_init(&wl->time_sync.timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	wl->time_sync.timer.function = &wlcore_time_sync_hrtimer_cb;
 	wl->time_sync.gpio_ktime = ktime_set(0, 0);
