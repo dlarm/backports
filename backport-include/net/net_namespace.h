@@ -1,62 +1,63 @@
 #ifndef _COMPAT_NET_NET_NAMESPACE_H
 #define _COMPAT_NET_NET_NAMESPACE_H 1
 
-#include_next <net/net_namespace.h>
-
-#if IS_ENABLED(CPTCFG_IEEE802154_6LOWPAN)
 #include <linux/version.h>
-#include <net/netns/ieee802154_6lowpan.h>
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0)
-/*
- * we provide backport for 6lowpan as per the dependencies file
- * down to 3.5 only.
- */
-extern struct netns_ieee802154_lowpan ieee802154_lowpan;
-struct netns_ieee802154_lowpan *net_ieee802154_lowpan(struct net *net);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)
-/* This can be removed once and if this gets upstream */
-static inline struct netns_ieee802154_lowpan *
-net_ieee802154_lowpan(struct net *net)
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23))
+#include_next <net/net_namespace.h>
+#endif /* (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23)) */
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
+#ifdef CONFIG_NET_NS
+static inline void write_pnet(struct net **pnet, struct net *net)
 {
-	return &net->ieee802154_lowpan;
+	*pnet = net;
 }
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) */
-#endif /* CPTCFG_IEEE802154_6LOWPAN */
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,20,0)
-/*
- * In older kernels we simply fail this function.
- */
-#define get_net_ns_by_fd	LINUX_BACKPORT(get_net_ns_by_fd)
-static inline struct net *get_net_ns_by_fd(int fd)
+static inline struct net *read_pnet(struct net * const *pnet)
 {
-	return ERR_PTR(-EINVAL);
+	return *pnet;
+}
+
+#else
+#define write_pnet(pnet, net)	do { (void)(net);} while (0)
+#define read_pnet(pnet)		(&init_net)
+#endif
+#endif /* < 2.6.29 */
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,26)
+#ifdef CONFIG_NET_NS
+static inline
+int net_eq(const struct net *net1, const struct net *net2)
+{
+	return net1 == net2;
+}
+#else
+static inline
+int net_eq(const struct net *net1, const struct net *net2)
+{
+	return 1;
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0)
-typedef struct {
-#ifdef CONFIG_NET_NS
-	struct net *net;
-#endif
-} possible_net_t;
-
-static inline void possible_write_pnet(possible_net_t *pnet, struct net *net)
+static inline
+void dev_net_set(struct net_device *dev, struct net *net)
 {
 #ifdef CONFIG_NET_NS
-	pnet->net = net;
+	release_net(dev->nd_net);
+	dev->nd_net = hold_net(net);
 #endif
 }
 
-static inline struct net *possible_read_pnet(const possible_net_t *pnet)
+static inline
+struct net *sock_net(const struct sock *sk)
 {
 #ifdef CONFIG_NET_NS
-	return pnet->net;
+	return sk->sk_net;
 #else
 	return &init_net;
 #endif
 }
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0) */
+#endif /* < 2.6.26 */
 
 #endif	/* _COMPAT_NET_NET_NAMESPACE_H */

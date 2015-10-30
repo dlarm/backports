@@ -204,12 +204,8 @@ struct wl1271_if_operations {
 };
 
 struct wlcore_platdev_data {
+	struct wl12xx_platform_data *pdata;
 	struct wl1271_if_operations *if_ops;
-
-	bool ref_clock_xtal;	/* specify whether the clock is XTAL or not */
-	u32 ref_clock_freq;	/* in Hertz */
-	u32 tcxo_clock_freq;	/* in Hertz, tcxo is always XTAL */
-	bool pwr_in_suspend;
 };
 
 #define MAX_NUM_KEYS 14
@@ -507,11 +503,6 @@ struct ieee80211_vif *wl12xx_wlvif_to_vif(struct wl12xx_vif *wlvif)
 	return container_of((void *)wlvif, struct ieee80211_vif, drv_priv);
 }
 
-static inline bool wlcore_is_p2p_mgmt(struct wl12xx_vif *wlvif)
-{
-	return wl12xx_wlvif_to_vif(wlvif)->type == NL80211_IFTYPE_P2P_DEVICE;
-}
-
 #define wl12xx_for_each_wlvif(wl, wlvif) \
 		list_for_each_entry(wlvif, &wl->wlvif_list, list)
 
@@ -534,8 +525,8 @@ int wl1271_recalc_rx_streaming(struct wl1271 *wl, struct wl12xx_vif *wlvif);
 void wl12xx_queue_recovery_work(struct wl1271 *wl);
 size_t wl12xx_copy_fwlog(struct wl1271 *wl, u8 *memblock, size_t maxlen);
 int wl1271_rx_filter_alloc_field(struct wl12xx_rx_filter *filter,
-				 u16 offset, u8 flags,
-				 const u8 *pattern, u8 len);
+					u16 offset, u8 flags,
+					u8 *pattern, u8 len);
 void wl1271_rx_filter_free(struct wl12xx_rx_filter *filter);
 struct wl12xx_rx_filter *wl1271_rx_filter_alloc(void);
 int wl1271_rx_filter_get_fields_size(struct wl12xx_rx_filter *filter);

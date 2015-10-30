@@ -492,10 +492,6 @@ EXPORT_SYMBOL_GPL(rndis_unbind);
  */
 int rndis_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 {
-	/* This check is no longer done by usbnet */
-	if (skb->len < dev->net->hard_header_len)
-		return 0;
-
 	/* peripheral may have batched packets to us... */
 	while (likely(skb->len)) {
 		struct rndis_data_hdr	*hdr = (void *)skb->data;
@@ -639,9 +635,7 @@ static struct usb_driver rndis_driver = {
 	.disconnect =	usbnet_disconnect,
 	.suspend =	usbnet_suspend,
 	.resume =	usbnet_resume,
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0))
 	.disable_hub_initiated_lpm = 1,
-#endif
 };
 
 module_usb_driver(rndis_driver);

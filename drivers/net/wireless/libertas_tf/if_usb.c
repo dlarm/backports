@@ -365,6 +365,7 @@ static int if_usb_reset_device(struct if_usb_card *cardp)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(if_usb_reset_device);
 
 /**
  *  usb_tx_block - transfer data to the device
@@ -906,6 +907,7 @@ restart:
 	lbtf_deb_leave_args(LBTF_DEB_USB, "ret %d", ret);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(if_usb_prog_firmware);
 
 
 #define if_usb_suspend NULL
@@ -918,9 +920,7 @@ static struct usb_driver if_usb_driver = {
 	.id_table = if_usb_table,
 	.suspend = if_usb_suspend,
 	.resume = if_usb_resume,
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0))
 	.disable_hub_initiated_lpm = 1,
-#endif
 };
 
 module_usb_driver(if_usb_driver);

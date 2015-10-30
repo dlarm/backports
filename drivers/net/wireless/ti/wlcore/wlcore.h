@@ -95,7 +95,7 @@ struct wlcore_ops {
 	int (*scan_stop)(struct wl1271 *wl, struct wl12xx_vif *wlvif);
 	int (*sched_scan_start)(struct wl1271 *wl, struct wl12xx_vif *wlvif,
 				struct cfg80211_sched_scan_request *req,
-				struct ieee80211_scan_ies *ies);
+				struct ieee80211_sched_scan_ies *ies);
 	void (*sched_scan_stop)(struct wl1271 *wl, struct wl12xx_vif *wlvif);
 	int (*get_spare_blocks)(struct wl1271 *wl, bool is_gem);
 	int (*set_key)(struct wl1271 *wl, enum set_key_cmd cmd,
@@ -123,9 +123,6 @@ struct wlcore_ops {
 	int (*smart_config_stop)(struct wl1271 *wl);
 	int (*smart_config_set_group_key)(struct wl1271 *wl, u16 group_id,
 					  u8 key_len, u8 *key);
-	int (*set_cac)(struct wl1271 *wl, struct wl12xx_vif *wlvif,
-		       bool start);
-	int (*dfs_master_restart)(struct wl1271 *wl, struct wl12xx_vif *wlvif);
 };
 
 enum wlcore_partitions {
@@ -183,19 +180,21 @@ struct wl1271_stats {
 	unsigned int excessive_retries;
 };
 
-struct wlcore_time_sync {
-	struct hrtimer timer;
-	int gpio;
-	u32 interval_ms;
-	ktime_t gpio_ktime;
-	ktime_t target_ktime;
+struct wlcore_aggr_reason {
+	u32 total;
+	u32 buffer_full;
+	u32 fw_buffer_full;
+	u32 other;
+	u32 no_data;
 };
 
 struct wl1271 {
 	bool initialized;
 	struct ieee80211_hw *hw;
 	bool mac80211_registered;
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
+	struct compat_threaded_irq irq_compat;
+#endif
 	struct device *dev;
 	struct platform_device *pdev;
 
@@ -204,8 +203,6 @@ struct wl1271 {
 	struct wl1271_if_operations *if_ops;
 
 	int irq;
-
-	int irq_flags;
 
 	spinlock_t wl_lock;
 
@@ -348,6 +345,7 @@ struct wl1271 {
 	struct delayed_work scan_complete_work;
 
 	struct ieee80211_vif *roc_vif;
+	unsigned long roc_cookie;
 	struct delayed_work roc_complete_work;
 
 	struct wl12xx_vif *sched_vif;
@@ -419,6 +417,9 @@ struct wl1271 {
 	/* Quirks of specific hardware revisions */
 	unsigned int quirks;
 
+	/* Platform limitations */
+	unsigned int platform_quirks;
+
 	/* number of currently active RX BA sessions */
 	int ba_rx_session_count;
 
@@ -477,10 +478,6 @@ struct wl1271 {
 	/* HW HT (11n) capabilities */
 	struct ieee80211_sta_ht_cap ht_cap[WLCORE_NUM_BANDS];
 
-	/* the current dfs region */
-	enum nl80211_dfs_regions dfs_region;
-	bool radar_debug_mode;
-
 	/* size of the private FW status data */
 	size_t fw_status_len;
 	size_t fw_status_priv_len;
@@ -515,20 +512,24 @@ struct wl1271 {
 	const struct ieee80211_iface_combination *iface_combinations;
 	u8 n_iface_combinations;
 
-	/* dynamic fw traces */
-	u32 dynamic_fw_traces;
+	struct wlcore_aggr_reason *aggr_pkts_reason;
+	u32 aggr_pkts_reason_num;
 
-	/* antenna diversity shut down */
-	u8 diversity_mode;
+	u32 tx_completions[32];
+	u32 rx_completions[32];
 
-	/* time sync timer */
-	struct wlcore_time_sync time_sync;
+	u32 irq_count;
+	u32 irq_loop_count;
+
+	/* the current dfs region */
+	enum nl80211_dfs_regions dfs_region;
+	bool radar_debug_mode;
 };
 
 int wlcore_probe(struct wl1271 *wl, struct platform_device *pdev);
 int wlcore_remove(struct platform_device *pdev);
 struct ieee80211_hw *wlcore_alloc_hw(size_t priv_size, u32 aggr_buf_size,
-				     u32 mbox_size);
+				     u32 mbox_size, u32 num_tx_desc);
 int wlcore_free_hw(struct wl1271 *wl);
 int wlcore_set_key(struct wl1271 *wl, enum set_key_cmd cmd,
 		   struct ieee80211_vif *vif,
@@ -537,8 +538,6 @@ int wlcore_set_key(struct wl1271 *wl, enum set_key_cmd cmd,
 void wlcore_regdomain_config(struct wl1271 *wl);
 void wlcore_update_inconn_sta(struct wl1271 *wl, struct wl12xx_vif *wlvif,
 			      struct wl1271_station *wl_sta, bool in_conn);
-
-void wlcore_trigger_time_sync(struct wl1271 *wl);
 
 static inline void
 wlcore_set_ht_cap(struct wl1271 *wl, enum ieee80211_band band,

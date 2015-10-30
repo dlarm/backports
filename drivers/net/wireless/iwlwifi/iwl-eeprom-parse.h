@@ -81,20 +81,18 @@ struct iwl_nvm_data {
 	bool sku_cap_band_24GHz_enable;
 	bool sku_cap_band_52GHz_enable;
 	bool sku_cap_11n_enable;
-	bool sku_cap_11ac_enable;
 	bool sku_cap_amt_enable;
 	bool sku_cap_ipan_enable;
 
-	u16 radio_cfg_type;
+	u8 radio_cfg_type;
 	u8 radio_cfg_step;
 	u8 radio_cfg_dash;
 	u8 radio_cfg_pnum;
 	u8 valid_tx_ant, valid_rx_ant;
 
-	u32 nvm_version;
+	u16 nvm_version;
 	s8 max_tx_pwr_half_dbm;
 
-	bool lar_enabled;
 	struct ieee80211_supported_band bands[IEEE80211_NUM_BANDS];
 	struct ieee80211_channel channels[];
 };

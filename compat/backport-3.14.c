@@ -11,6 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/pci.h>
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,30)
 #ifdef CONFIG_PCI_MSI
 /**
  * pci_enable_msi_range - configure device's MSI capability structure
@@ -46,6 +47,7 @@ int pci_enable_msi_range(struct pci_dev *dev, int minvec, int maxvec)
 	return nvec;
 }
 EXPORT_SYMBOL(pci_enable_msi_range);
+#endif
 #endif
 
 #ifdef CONFIG_PCI_MSI

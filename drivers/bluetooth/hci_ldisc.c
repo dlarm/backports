@@ -44,15 +44,13 @@
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 
-#include "btintel.h"
-#include "btbcm.h"
 #include "hci_uart.h"
 
-#define VERSION "2.3"
+#define VERSION "2.2"
 
-static const struct hci_uart_proto *hup[HCI_UART_MAX_PROTO];
+static struct hci_uart_proto *hup[HCI_UART_MAX_PROTO];
 
-int hci_uart_register_proto(const struct hci_uart_proto *p)
+int hci_uart_register_proto(struct hci_uart_proto *p)
 {
 	if (p->id >= HCI_UART_MAX_PROTO)
 		return -EINVAL;
@@ -62,12 +60,10 @@ int hci_uart_register_proto(const struct hci_uart_proto *p)
 
 	hup[p->id] = p;
 
-	BT_INFO("HCI UART protocol %s registered", p->name);
-
 	return 0;
 }
 
-int hci_uart_unregister_proto(const struct hci_uart_proto *p)
+int hci_uart_unregister_proto(struct hci_uart_proto *p)
 {
 	if (p->id >= HCI_UART_MAX_PROTO)
 		return -EINVAL;
@@ -80,7 +76,7 @@ int hci_uart_unregister_proto(const struct hci_uart_proto *p)
 	return 0;
 }
 
-static const struct hci_uart_proto *hci_uart_get_proto(unsigned int id)
+static struct hci_uart_proto *hci_uart_get_proto(unsigned int id)
 {
 	if (id >= HCI_UART_MAX_PROTO)
 		return NULL;
@@ -122,28 +118,16 @@ static inline struct sk_buff *hci_uart_dequeue(struct hci_uart *hu)
 
 int hci_uart_tx_wakeup(struct hci_uart *hu)
 {
+	struct tty_struct *tty = hu->tty;
+	struct hci_dev *hdev = hu->hdev;
+	struct sk_buff *skb;
+
 	if (test_and_set_bit(HCI_UART_SENDING, &hu->tx_state)) {
 		set_bit(HCI_UART_TX_WAKEUP, &hu->tx_state);
 		return 0;
 	}
 
 	BT_DBG("");
-
-	schedule_work(&hu->write_work);
-
-	return 0;
-}
-
-static void hci_uart_write_work(struct work_struct *work)
-{
-	struct hci_uart *hu = container_of(work, struct hci_uart, write_work);
-	struct tty_struct *tty = hu->tty;
-	struct hci_dev *hdev = hu->hdev;
-	struct sk_buff *skb;
-
-	/* REVISIT: should we cope with bad skbs or ->write() returning
-	 * and error value ?
-	 */
 
 restart:
 	clear_bit(HCI_UART_TX_WAKEUP, &hu->tx_state);
@@ -169,6 +153,7 @@ restart:
 		goto restart;
 
 	clear_bit(HCI_UART_SENDING, &hu->tx_state);
+	return 0;
 }
 
 static void hci_uart_init_work(struct work_struct *work)
@@ -265,54 +250,6 @@ static int hci_uart_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 	return 0;
 }
 
-static int hci_uart_setup(struct hci_dev *hdev)
-{
-	struct hci_uart *hu = hci_get_drvdata(hdev);
-	struct hci_rp_read_local_version *ver;
-	struct sk_buff *skb;
-
-	if (hu->proto->setup)
-		return hu->proto->setup(hu);
-
-	if (!test_bit(HCI_UART_VND_DETECT, &hu->hdev_flags))
-		return 0;
-
-	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
-			     HCI_INIT_TIMEOUT);
-	if (IS_ERR(skb)) {
-		BT_ERR("%s: Reading local version information failed (%ld)",
-		       hdev->name, PTR_ERR(skb));
-		return 0;
-	}
-
-	if (skb->len != sizeof(*ver)) {
-		BT_ERR("%s: Event length mismatch for version information",
-		       hdev->name);
-		goto done;
-	}
-
-	ver = (struct hci_rp_read_local_version *)skb->data;
-
-	switch (le16_to_cpu(ver->manufacturer)) {
-#ifdef CPTCFG_BT_HCIUART_INTEL
-	case 2:
-		hdev->set_bdaddr = btintel_set_bdaddr;
-		btintel_check_bdaddr(hdev);
-		break;
-#endif
-#ifdef CPTCFG_BT_HCIUART_BCM
-	case 15:
-		hdev->set_bdaddr = btbcm_set_bdaddr;
-		btbcm_check_bdaddr(hdev);
-		break;
-#endif
-	}
-
-done:
-	kfree_skb(skb);
-	return 0;
-}
-
 /* ------ LDISC part ------ */
 /* hci_uart_tty_open
  *
@@ -334,8 +271,7 @@ static int hci_uart_tty_open(struct tty_struct *tty)
 	if (tty->ops->write == NULL)
 		return -EOPNOTSUPP;
 
-	hu = kzalloc(sizeof(struct hci_uart), GFP_KERNEL);
-	if (!hu) {
+	if (!(hu = kzalloc(sizeof(struct hci_uart), GFP_KERNEL))) {
 		BT_ERR("Can't allocate control structure");
 		return -ENFILE;
 	}
@@ -345,7 +281,6 @@ static int hci_uart_tty_open(struct tty_struct *tty)
 	tty->receive_room = 65536;
 
 	INIT_WORK(&hu->init_ready, hci_uart_init_work);
-	INIT_WORK(&hu->write_work, hci_uart_write_work);
 
 	spin_lock_init(&hu->rx_lock);
 
@@ -354,8 +289,13 @@ static int hci_uart_tty_open(struct tty_struct *tty)
 	/* FIXME: why is this needed. Note don't use ldisc_ref here as the
 	   open path is before the ldisc is referencable */
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,30))
 	if (tty->ldisc->ops->flush_buffer)
 		tty->ldisc->ops->flush_buffer(tty);
+#else
+	if (tty->ldisc.ops->flush_buffer)
+		tty->ldisc.ops->flush_buffer(tty);
+#endif
 	tty_driver_flush_buffer(tty);
 
 	return 0;
@@ -368,7 +308,7 @@ static int hci_uart_tty_open(struct tty_struct *tty)
  */
 static void hci_uart_tty_close(struct tty_struct *tty)
 {
-	struct hci_uart *hu = tty->disc_data;
+	struct hci_uart *hu = (void *)tty->disc_data;
 	struct hci_dev *hdev;
 
 	BT_DBG("tty %p", tty);
@@ -382,8 +322,6 @@ static void hci_uart_tty_close(struct tty_struct *tty)
 	hdev = hu->hdev;
 	if (hdev)
 		hci_uart_close(hdev);
-
-	cancel_work_sync(&hu->write_work);
 
 	if (test_and_clear_bit(HCI_UART_PROTO_SET, &hu->flags)) {
 		if (hdev) {
@@ -407,7 +345,7 @@ static void hci_uart_tty_close(struct tty_struct *tty)
  */
 static void hci_uart_tty_wakeup(struct tty_struct *tty)
 {
-	struct hci_uart *hu = tty->disc_data;
+	struct hci_uart *hu = (void *)tty->disc_data;
 
 	BT_DBG("");
 
@@ -435,10 +373,9 @@ static void hci_uart_tty_wakeup(struct tty_struct *tty)
  *
  * Return Value:    None
  */
-static void hci_uart_tty_receive(struct tty_struct *tty, const u8 *data,
-				 char *flags, int count)
+static void hci_uart_tty_receive(struct tty_struct *tty, const u8 *data, char *flags, int count)
 {
-	struct hci_uart *hu = tty->disc_data;
+	struct hci_uart *hu = (void *)tty->disc_data;
 
 	if (!hu || tty != hu->tty)
 		return;
@@ -447,7 +384,7 @@ static void hci_uart_tty_receive(struct tty_struct *tty, const u8 *data,
 		return;
 
 	spin_lock(&hu->rx_lock);
-	hu->proto->recv(hu, data, count);
+	hu->proto->recv(hu, (void *) data, count);
 
 	if (hu->hdev)
 		hu->hdev->stat.byte_rx += count;
@@ -479,14 +416,13 @@ static int hci_uart_register_dev(struct hci_uart *hu)
 	hdev->close = hci_uart_close;
 	hdev->flush = hci_uart_flush;
 	hdev->send  = hci_uart_send_frame;
-	hdev->setup = hci_uart_setup;
+
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,36))
 	SET_HCIDEV_DEV(hdev, hu->tty->dev);
+#endif
 
 	if (test_bit(HCI_UART_RAW_DEVICE, &hu->hdev_flags))
 		set_bit(HCI_QUIRK_RAW_DEVICE, &hdev->quirks);
-
-	if (test_bit(HCI_UART_EXT_CONFIG, &hu->hdev_flags))
-		set_bit(HCI_QUIRK_EXTERNAL_CONFIG, &hdev->quirks);
 
 	if (!test_bit(HCI_UART_RESET_ON_INIT, &hu->hdev_flags))
 		set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
@@ -512,7 +448,7 @@ static int hci_uart_register_dev(struct hci_uart *hu)
 
 static int hci_uart_set_proto(struct hci_uart *hu, int id)
 {
-	const struct hci_uart_proto *p;
+	struct hci_uart_proto *p;
 	int err;
 
 	p = hci_uart_get_proto(id);
@@ -534,23 +470,6 @@ static int hci_uart_set_proto(struct hci_uart *hu, int id)
 	return 0;
 }
 
-static int hci_uart_set_flags(struct hci_uart *hu, unsigned long flags)
-{
-	unsigned long valid_flags = BIT(HCI_UART_RAW_DEVICE) |
-				    BIT(HCI_UART_RESET_ON_INIT) |
-				    BIT(HCI_UART_CREATE_AMP) |
-				    BIT(HCI_UART_INIT_PENDING) |
-				    BIT(HCI_UART_EXT_CONFIG) |
-				    BIT(HCI_UART_VND_DETECT);
-
-	if (flags & ~valid_flags)
-		return -EINVAL;
-
-	hu->hdev_flags = flags;
-
-	return 0;
-}
-
 /* hci_uart_tty_ioctl()
  *
  *    Process IOCTL system call for the tty device.
@@ -564,10 +483,10 @@ static int hci_uart_set_flags(struct hci_uart *hu, unsigned long flags)
  *
  * Return Value:    Command dependent
  */
-static int hci_uart_tty_ioctl(struct tty_struct *tty, struct file *file,
-			      unsigned int cmd, unsigned long arg)
+static int hci_uart_tty_ioctl(struct tty_struct *tty, struct file * file,
+					unsigned int cmd, unsigned long arg)
 {
-	struct hci_uart *hu = tty->disc_data;
+	struct hci_uart *hu = (void *)tty->disc_data;
 	int err = 0;
 
 	BT_DBG("");
@@ -594,23 +513,25 @@ static int hci_uart_tty_ioctl(struct tty_struct *tty, struct file *file,
 		return -EUNATCH;
 
 	case HCIUARTGETDEVICE:
-		if (test_bit(HCI_UART_REGISTERED, &hu->flags))
+		if (test_bit(HCI_UART_PROTO_SET, &hu->flags))
 			return hu->hdev->id;
 		return -EUNATCH;
 
 	case HCIUARTSETFLAGS:
 		if (test_bit(HCI_UART_PROTO_SET, &hu->flags))
 			return -EBUSY;
-		err = hci_uart_set_flags(hu, arg);
-		if (err)
-			return err;
+		hu->hdev_flags = arg;
 		break;
 
 	case HCIUARTGETFLAGS:
 		return hu->hdev_flags;
 
 	default:
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,27))
 		err = n_tty_ioctl_helper(tty, file, cmd, arg);
+#else
+		err = n_tty_ioctl(tty, file, cmd, arg);
+#endif
 		break;
 	}
 
@@ -621,19 +542,19 @@ static int hci_uart_tty_ioctl(struct tty_struct *tty, struct file *file,
  * We don't provide read/write/poll interface for user space.
  */
 static ssize_t hci_uart_tty_read(struct tty_struct *tty, struct file *file,
-				 unsigned char __user *buf, size_t nr)
+					unsigned char __user *buf, size_t nr)
 {
 	return 0;
 }
 
 static ssize_t hci_uart_tty_write(struct tty_struct *tty, struct file *file,
-				  const unsigned char *data, size_t count)
+					const unsigned char *data, size_t count)
 {
 	return 0;
 }
 
 static unsigned int hci_uart_tty_poll(struct tty_struct *tty,
-				      struct file *filp, poll_table *wait)
+					struct file *filp, poll_table *wait)
 {
 	return 0;
 }
@@ -660,8 +581,7 @@ static int __init hci_uart_init(void)
 	hci_uart_ldisc.write_wakeup	= hci_uart_tty_wakeup;
 	hci_uart_ldisc.owner		= THIS_MODULE;
 
-	err = tty_register_ldisc(N_HCI, &hci_uart_ldisc);
-	if (err) {
+	if ((err = tty_register_ldisc(N_HCI, &hci_uart_ldisc))) {
 		BT_ERR("HCI line discipline registration failed. (%d)", err);
 		return err;
 	}
@@ -680,9 +600,6 @@ static int __init hci_uart_init(void)
 #endif
 #ifdef CPTCFG_BT_HCIUART_3WIRE
 	h5_init();
-#endif
-#ifdef CPTCFG_BT_HCIUART_BCM
-	bcm_init();
 #endif
 
 	return 0;
@@ -707,13 +624,9 @@ static void __exit hci_uart_exit(void)
 #ifdef CPTCFG_BT_HCIUART_3WIRE
 	h5_deinit();
 #endif
-#ifdef CPTCFG_BT_HCIUART_BCM
-	bcm_deinit();
-#endif
 
 	/* Release tty registration of line discipline */
-	err = tty_unregister_ldisc(N_HCI);
-	if (err)
+	if ((err = tty_unregister_ldisc(N_HCI)))
 		BT_ERR("Can't unregister HCI line discipline (%d)", err);
 }
 
