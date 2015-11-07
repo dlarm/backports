@@ -3,7 +3,7 @@
 #include_next <linux/completion.h>
 #include <linux/version.h>
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,13,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,53)
 /**
  * reinit_completion - reinitialize a completion structure
  * @x:  pointer to completion structure that is to be reinitialized
